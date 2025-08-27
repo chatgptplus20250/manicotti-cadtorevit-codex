@@ -8,6 +8,7 @@ using Autodesk.Revit.ApplicationServices;
 using Autodesk.Revit.Attributes;
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using Manicotti.Util;
 
 namespace Manicotti
 {
@@ -79,10 +80,10 @@ namespace Manicotti
             wallCrvs.AddRange(patchLines);
 
             // Merge lines when they are parallel and almost intersected (knob)
-            List<Curve> mergeLines = CmdPatchBoundary.CloseGapAtBreakpoint(wallCrvs);
+            List<Curve> mergeLines = GeometryCleanUtils.MergeCollinearLines(wallCrvs);
 
             // 
-            List<Curve> fixedLines = CmdPatchBoundary.CloseGapAtCorner(mergeLines);
+            List<Curve> fixedLines = GeometryCleanUtils.CloseGapsAtCorners(mergeLines);
 
             #endregion
             // OUTPUT List<Line> fixedLines
@@ -321,7 +322,7 @@ namespace Manicotti
             // The boolean union method of the loops needs to fix
             var perimeter = RegionDetect.GetBoundary(loops);
 
-            var recPerimeter = CmdPatchBoundary.CloseGapAtBreakpoint(perimeter);
+            var recPerimeter = GeometryCleanUtils.MergeCollinearLines(perimeter);
 
             #endregion
             // OUTPUT List<CurveArray> loops

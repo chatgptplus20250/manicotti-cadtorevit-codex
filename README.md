@@ -74,3 +74,36 @@ To-do list moved to [TaskBoard](https://github.com/ian-quinn/manicotti/issues/1)
 A demo is online to build up the building model from CAD drawings. Only core components are covered (wall column window door room floor roof). For now the project still needs more cunning & robust algorithms to sort out layers/components and reshape the geometry, which will be the main theme in the next-phase coding.  
 
 <img src="/Demo/Screenshot.jpg?raw=true">
+
+## Configuration
+
+The plugin's behavior can be customized via configuration files located in the `Resources/config` sub-directory of the plugin installation folder.
+
+### Layer Mapping (`layer-map.json`)
+
+To provide maximum flexibility, the plugin uses a JSON file to map the layer names from your DWG files to the functional roles needed to build the Revit model (e.g., WALL, COLUMN, etc.). This allows you to use any layer naming convention without needing to change the plugin's code.
+
+**Location:** `<Plugin_Install_Folder>/Resources/config/layer-map.json`
+
+**Format:**
+The file is a standard JSON object.
+-   **Keys:** Represent the functional role of the element. The recognized roles are `WALL`, `COLUMN`, `DOOR`, `WINDOW`, `OPENING`, `SLAB`, `GRID`, and `SPACE`.
+-   **Values:** An array of strings, where each string is a layer name from your DWG file that corresponds to that role.
+
+**Matching Rules:**
+-   Matching is **case-insensitive**.
+-   You can use a wildcard `*` at the end of a layer name to match all layers that start with that prefix. For example, `"WALL_*"` will match `WALL_EXTERIOR`, `WALL_INTERIOR`, etc.
+
+**Example `layer-map.json`:**
+```json
+{
+  "WALL":   ["A-WALL", "WALL_*"],
+  "COLUMN": ["A-COL", "STR_COL_*"],
+  "DOOR":   ["A-DOOR", "DOOR", "D_*"],
+  "WINDOW": ["A-WIN", "WINDOW", "WIND_*"],
+  "OPENING":["A-OPEN", "VOID"],
+  "SLAB":   ["A-SLAB", "FLOOR*"],
+  "GRID":   ["A-GRID", "AXIS"],
+  "SPACE":  ["RM", "SPACE", "ROOM"]
+}
+```

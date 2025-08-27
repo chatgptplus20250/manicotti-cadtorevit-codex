@@ -1,0 +1,9 @@
+{
+  "WALL": ["WALL", "A-WALL", "墙"],
+  "COLUMN": ["COLUMN", "A-COL", "أعمدة"],
+  "DOOR": ["DOOR", "A-DOOR", "أبواب"],
+  "WINDOW": ["WINDOW", "A-WIN", "شبابيك"],
+  "OPENING": ["OPENING", "A-OPEN", "فتحات"],
+  "SPACE": ["SPACE", "RM", "فراغ"],
+  "FRAME": ["FRAME", "G-FRAME", "G-BORDER", "إطار"]
+}

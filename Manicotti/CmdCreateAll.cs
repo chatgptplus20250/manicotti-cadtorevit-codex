@@ -11,6 +11,7 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.DB.Architecture;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.UI.Selection;
+using Manicotti.Util;
 #endregion
 
 namespace Manicotti
@@ -20,19 +21,10 @@ namespace Manicotti
     {
         public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
         {
-            AppDomain currentDomain = AppDomain.CurrentDomain;
-            currentDomain.AssemblyResolve += new ResolveEventHandler(Misc.LoadFromSameFolder);
-
             UIApplication uiapp = commandData.Application;
             UIDocument uidoc = uiapp.ActiveUIDocument;
-            Application app = uiapp.Application;
             Document doc = uidoc.Document;
 
-            View active_view = doc.ActiveView;
-
-            double tolerance = app.ShortCurveTolerance;
-
-            ///////////////////////
             // Pick Import Instance
             ImportInstance import = null;
             try
@@ -113,9 +105,25 @@ namespace Manicotti
             // Prepare frames and levels
             // Cluster all geometry elements and texts into datatrees
             // Two procedures are intertwined
-            List<GeometryObject> dwg_frames = Util.TeighaGeometry.ExtractElement(uidoc, import, 
-                Properties.Settings.Default.layerFrame, "PolyLine"); // framework is polyline by default
             List<GeometryObject> dwg_geos = Util.TeighaGeometry.ExtractElement(uidoc, import);
+
+            // NEW: Extract frames from all geos using the layer map
+            List<GeometryObject> dwg_frames = new List<GeometryObject>();
+            if (dwg_geos != null)
+            {
+                foreach (GeometryObject geo in dwg_geos)
+                {
+                    // A PolyLine is required to be a frame
+                    if (geo is PolyLine)
+                    {
+                        var gStyle = doc.GetElement(geo.GraphicsStyleId) as GraphicsStyle;
+                        if (gStyle != null && layerMap.FRAME.Contains(gStyle.GraphicsStyleCategory.Name.ToUpperInvariant()))
+                        {
+                            dwg_frames.Add(geo);
+                        }
+                    }
+                }
+            }
             
             // Terminate if no geometry has been found
             if (dwg_geos == null)
@@ -331,7 +339,10 @@ namespace Manicotti
                         foreach (GeometryObject go in geoDict[i])
                         {
                             var gStyle = doc.GetElement(go.GraphicsStyleId) as GraphicsStyle;
-                            if (gStyle.GraphicsStyleCategory.Name == Properties.Settings.Default.layerWall)
+                            if (gStyle == null) continue;
+                            string layerNameUpper = gStyle.GraphicsStyleCategory.Name.ToUpperInvariant();
+
+                            if (layerMap.WALL.Contains(layerNameUpper))
                             {
                                 if (go.GetType().Name == "Line")
                                 {
@@ -347,7 +358,7 @@ namespace Manicotti
                                     }
                                 }
                             }
-                            if (gStyle.GraphicsStyleCategory.Name == Properties.Settings.Default.layerColumn)
+                            if (layerMap.COLUMN.Contains(layerNameUpper))
                             {
                                 if (go.GetType().Name == "Line")
                                 {
@@ -363,7 +374,7 @@ namespace Manicotti
                                     }
                                 }
                             }
-                            if (gStyle.GraphicsStyleCategory.Name == Properties.Settings.Default.layerDoor)
+                            if (layerMap.DOOR.Contains(layerNameUpper))
                             {
                                 Curve doorCrv = go as Curve;
                                 PolyLine poly = go as PolyLine;
@@ -380,7 +391,7 @@ namespace Manicotti
                                     }
                                 }
                             }
-                            if (gStyle.GraphicsStyleCategory.Name == Properties.Settings.Default.layerWindow)
+                            if (layerMap.WINDOW.Contains(layerNameUpper))
                             {
                                 Curve windowCrv = go as Curve;
                                 PolyLine poly = go as PolyLine;
@@ -425,21 +436,218 @@ namespace Manicotti
                         // MILESTONE
                         pb.CustomizeStatus("On Floor " + i.ToString() + "... with Walls", 90 / levelCounter / 4);
                         if (pb.ProcessCancelled) return Result.Cancelled;
-                        CreateWall.Execute(uiapp, wallCrvs, currentLevel, true);
+
+                        // Refactored Wall Creation Logic
+                        List<Wall> createdWalls = new List<Wall>();
+                        using (var t_wall = new Transaction(doc, "Create Walls"))
+                        {
+                            t_wall.Start();
+                            // Logic from CreateWall.cs
+                            List<Curve> axes = new List<Curve>();
+                            double bias = Misc.MmToFoot(20);
+                            var doubleLines = Misc.CrvsToLines(wallCrvs);
+                            for (int k = 0; k < doubleLines.Count; k++)
+                            {
+                                for (int j = 0; j < doubleLines.Count - k; j++)
+                                {
+                                    if (Algorithm.IsParallel(doubleLines[k], doubleLines[k + j])
+                                        && !Algorithm.IsIntersected(doubleLines[k], doubleLines[k + j]))
+                                    {
+                                        if (Algorithm.LineSpacing(doubleLines[k], doubleLines[k + j]) < Misc.MmToFoot(200) + bias
+                                        && Algorithm.LineSpacing(doubleLines[k], doubleLines[k + j]) > Misc.MmToFoot(200) - bias
+                                        && Algorithm.IsShadowing(doubleLines[k], doubleLines[k + j]))
+                                        {
+                                            if (Algorithm.GenerateAxis(doubleLines[k], doubleLines[k + j]) != null)
+                                            {
+                                                axes.Add(Algorithm.GenerateAxis(doubleLines[k], doubleLines[k + j]));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            List<Curve> mergedAxes = Algorithm.MergeAxes(axes);
+                            foreach (Curve axis in mergedAxes)
+                            {
+                                Wall newWall = Wall.Create(doc, axis, currentLevel.Id, true);
+                                createdWalls.Add(newWall);
+                            }
+                            t_wall.Commit();
+                        }
 
                         // MILESTONE
                         pb.CustomizeStatus("On Floor " + i.ToString() + "... with Columns", 90 / levelCounter / 4);
                         if (pb.ProcessCancelled) return Result.Cancelled;
-                        CreateColumn.Execute(app, doc, columnCrvs, 
-                            Properties.Settings.Default.name_columnRect, 
-                            Properties.Settings.Default.name_columnRound,
-                            currentLevel, true);
+
+                        // Refactored Column Creation Logic from CreateColumn.cs
+                        using (var t_col = new Transaction(doc, "Create Columns"))
+                        {
+                            t_col.Start();
+
+                            List<List<Curve>> columnRect = new List<List<Curve>>();
+                            List<Arc> columnRound = new List<Arc>();
+                            List<List<Curve>> columnSpecialShaped = new List<List<Curve>>();
+                            List<Curve> sortedLines = new List<Curve>();
+                            foreach (Curve columnLine in columnCrvs)
+                            {
+                                if (columnLine is Arc) { columnRound.Add(columnLine as Arc); }
+                                else { sortedLines.Add(columnLine); }
+                            }
+                            List<List<Curve>> columnGroups = Algorithm.ClusterByIntersect(sortedLines);
+                            foreach (List<Curve> columnGroup in columnGroups)
+                            {
+                                if (Algorithm.GetPtsOfCrvs(columnGroup).Count == columnGroup.Count)
+                                {
+                                    if (Algorithm.IsRectangle(columnGroup)) { columnRect.Add(columnGroup); }
+                                    else { columnSpecialShaped.Add(columnGroup); }
+                                }
+                            }
+
+                            // Rectangular columns
+                            foreach (List<Curve> baselines in columnRect)
+                            {
+                                double width = Algorithm.GetSizeOfRectangle(Misc.CrvsToLines(baselines)).Item1;
+                                double depth = Algorithm.GetSizeOfRectangle(Misc.CrvsToLines(baselines)).Item2;
+                                double angle = Algorithm.GetSizeOfRectangle(Misc.CrvsToLines(baselines)).Item3;
+                                FamilySymbol fs = NewRectColumnType(doc, Properties.Settings.Default.name_columnRect, width, depth);
+                                if (fs != null && !fs.IsActive) { fs.Activate(); }
+                                XYZ columnCenterPt = Algorithm.GetCenterPt(baselines);
+                                Line columnCenterAxis = Line.CreateBound(columnCenterPt, columnCenterPt.Add(-XYZ.BasisZ));
+                                FamilyInstance fi = doc.Create.NewFamilyInstance(columnCenterPt, fs, currentLevel, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+                                ElementTransformUtils.RotateElement(doc, fi.Id, columnCenterAxis, angle);
+                            }
+
+                            // Round columns
+                            foreach (Arc baseline in columnRound)
+                            {
+                                XYZ basePt = baseline.Center;
+                                double diameter = Misc.FootToMm(Math.Round(2 * baseline.Radius, 2));
+                                FamilySymbol fs = NewRoundColumnType(doc, Properties.Settings.Default.name_columnRound, diameter);
+                                if (fs != null && !fs.IsActive) { fs.Activate(); }
+                                FamilyInstance fi = doc.Create.NewFamilyInstance(basePt, fs, currentLevel, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+                            }
+
+                            // Special shaped columns (Requires a separate transaction for each due to family loading)
+                            // This part will be handled outside the main transaction loop for columns.
+
+                            t_col.Commit();
+                        }
+
+                        // Special shaped columns must be handled one-by-one because they involve creating and loading a new family.
+                        foreach (List<Curve> baselines in columnSpecialShaped)
+                        {
+                            using (var t_special_col = new Transaction(doc, "Create Special Shaped Column"))
+                            {
+                                t_special_col.Start();
+                                var boundary = Algorithm.RectifyPolygon(Misc.CrvsToLines(baselines));
+                                FamilySymbol fs = NewSpecialShapedColumnType(app, doc, boundary);
+                                if (fs != null)
+                                {
+                                    if (!fs.IsActive) { fs.Activate(); }
+                                    // BUG FIX: Calculate the center point for correct placement
+                                    XYZ centerPt = Algorithm.GetCenterPt(baselines);
+                                    FamilyInstance fi = doc.Create.NewFamilyInstance(centerPt, fs, currentLevel, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+                                }
+                                t_special_col.Commit();
+                            }
+                        }
 
                         // MILESTONE
                         pb.CustomizeStatus("On Floor " + i.ToString() + "... with Openings", 90 / levelCounter / 4);
                         if (pb.ProcessCancelled) return Result.Cancelled;
-                        CreateOpening.Execute(doc, doorCrvs, windowCrvs, wallCrvs, textDict[i], 
-                            Properties.Settings.Default.name_door, Properties.Settings.Default.name_window, currentLevel, true);
+
+                        // Refactored Opening Creation Logic
+                        using (var t_open = new Transaction(doc, "Create Openings"))
+                        {
+                            t_open.Start();
+
+                            var doorClusters = Algorithm.ClusterByIntersect(doorCrvs);
+                            List<List<Curve>> doorBlocks = new List<List<Curve>>();
+                            foreach (List<Curve> cluster in doorClusters)
+                            {
+                                if (null != Algorithm.CreateBoundingBox2D(cluster)) { doorBlocks.Add(Algorithm.CreateBoundingBox2D(cluster)); }
+                            }
+                            List<Curve> doorAxes = new List<Curve>();
+                            foreach (List<Curve> doorBlock in doorBlocks)
+                            {
+                                for (int k = 0; k < doorBlock.Count; k++)
+                                {
+                                    int sectCount = 0;
+                                    List<Curve> fenses = new List<Curve>();
+                                    foreach (Curve line in wallCrvs)
+                                    {
+                                        Curve testCrv = doorBlock[k].Clone();
+                                        if (RegionDetect.ExtendCrv(testCrv, 0.01).Intersect(line, out IntersectionResultArray results) == SetComparisonResult.Overlap)
+                                        {
+                                            sectCount += 1;
+                                            fenses.Add(line);
+                                        }
+                                    }
+                                    if (sectCount == 2)
+                                    {
+                                        XYZ projecting = fenses[0].Evaluate(0.5, true);
+                                        XYZ projected = fenses[1].Project(projecting).XYZPoint;
+                                        if (fenses[0].Length > fenses[1].Length)
+                                        {
+                                            projecting = fenses[1].Evaluate(0.5, true);
+                                            projected = fenses[0].Project(projecting).XYZPoint;
+                                        }
+                                        doorAxes.Add(Line.CreateBound(projecting, projected));
+                                    }
+                                }
+                            }
+
+                            var windowClusters = Algorithm.ClusterByIntersect(windowCrvs);
+                            List<List<Curve>> windowBlocks = new List<List<Curve>>();
+                            foreach (List<Curve> cluster in windowClusters)
+                            {
+                                if (null != Algorithm.CreateBoundingBox2D(cluster)) { windowBlocks.Add(Algorithm.CreateBoundingBox2D(cluster)); }
+                            }
+                            List<Curve> windowAxes = new List<Curve>();
+                            foreach (List<Curve> windowBlock in windowBlocks)
+                            {
+                                Line axis1 = Line.CreateBound((windowBlock[0].GetEndPoint(0) + windowBlock[0].GetEndPoint(1)).Divide(2), (windowBlock[2].GetEndPoint(0) + windowBlock[2].GetEndPoint(1)).Divide(2));
+                                Line axis2 = Line.CreateBound((windowBlock[1].GetEndPoint(0) + windowBlock[1].GetEndPoint(1)).Divide(2), (windowBlock[3].GetEndPoint(0) + windowBlock[3].GetEndPoint(1)).Divide(2));
+                                windowAxes.Add(axis1.Length > axis2.Length ? axis1 : axis2);
+                            }
+
+                            // Create door instances
+                            foreach (Curve doorAxis in doorAxes)
+                            {
+                                XYZ basePt = (doorAxis.GetEndPoint(0) + doorAxis.GetEndPoint(1)).Divide(2);
+                                Wall hostWall = FindHostWall(basePt, createdWalls);
+                                if (hostWall == null) continue;
+
+                                double width = Math.Round(Misc.FootToMm(doorAxis.Length), 0);
+                                double height = 2000; // Default height
+                                XYZ insertPt = basePt + XYZ.BasisZ * currentLevel.Elevation;
+
+                                FamilySymbol fs = NewOpeningType(doc, Properties.Settings.Default.name_door, width, height, "Door");
+                                if (fs == null) continue;
+                                if (!fs.IsActive) fs.Activate();
+
+                                doc.Create.NewFamilyInstance(insertPt, fs, hostWall, currentLevel, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+                            }
+
+                            // Create window instances
+                            foreach (Curve windowAxis in windowAxes)
+                            {
+                                XYZ basePt = (windowAxis.GetEndPoint(0) + windowAxis.GetEndPoint(1)).Divide(2);
+                                Wall hostWall = FindHostWall(basePt, createdWalls);
+                                if (hostWall == null) continue;
+
+                                double width = Math.Round(Misc.FootToMm(windowAxis.Length), 0);
+                                double height = 1500; // Default height
+                                XYZ insertPt = basePt + XYZ.BasisZ * (Misc.MmToFoot(Properties.Settings.Default.sillHeight) + currentLevel.Elevation);
+
+                                FamilySymbol fs = NewOpeningType(doc, Properties.Settings.Default.name_window, width, height, "Window");
+                                if (fs == null) continue;
+                                if (!fs.IsActive) fs.Activate();
+
+                                FamilyInstance fi = doc.Create.NewFamilyInstance(insertPt, fs, hostWall, currentLevel, Autodesk.Revit.DB.Structure.StructuralType.NonStructural);
+                            }
+
+                            t_open.Commit();
+                        }
 
                         // Create floor
                         // MILESTONE
@@ -477,7 +685,7 @@ namespace Manicotti
                                         string roomName = "";
                                         foreach (Util.TeighaText.CADTextModel label in textDict[i])
                                         {
-                                            if (label.Layer == Properties.Settings.Default.layerSpace)
+                                            if (layerMap.SPACE.Contains(label.Layer.ToUpperInvariant()))
                                             {
                                                 if (room.IsPointInRoom(label.Location + XYZ.BasisZ * (i - 1) * floorHeight))
                                                 {
@@ -535,5 +743,186 @@ namespace Manicotti
 
             return Result.Succeeded;
         }
+
+        #region Element Creation Helpers
+        // Helper methods moved from CreateColumn.cs and CreateOpening.cs
+
+        private Wall FindHostWall(XYZ openingCenter, List<Wall> walls)
+        {
+            Wall closestWall = null;
+            double minDistance = double.MaxValue;
+            foreach (Wall wall in walls)
+            {
+                double distance = (wall.Location as LocationCurve).Curve.Distance(openingCenter);
+                if (distance < minDistance)
+                {
+                    minDistance = distance;
+                    closestWall = wall;
+                }
+            }
+            // If the closest wall is more than 5ft away, it's probably not the host.
+            if (minDistance > 5.0)
+            {
+                return null;
+            }
+            return closestWall;
+        }
+
+        private static FamilySymbol NewOpeningType(Document doc, string familyName, double width, double height, string type = "")
+        {
+            string defaultPath = "";
+            if (type == "Door") defaultPath = Properties.Settings.Default.url_door;
+            if (type == "Window") defaultPath = Properties.Settings.Default.url_window;
+
+            Family f = FamilyLoaderUtils.GetAndLoadFamily(doc, familyName, defaultPath);
+            if (f == null)
+            {
+                TaskDialog.Show("Family Load Error", $"The required family '{familyName}' could not be loaded.");
+                return null;
+            }
+
+            // Logic to find or create the specific type (FamilySymbol)
+            string typeName = $"{width} x {height}mm";
+            FamilySymbol s = f.GetFamilySymbolIds().Select(id => doc.GetElement(id) as FamilySymbol).FirstOrDefault(fs => fs.Name == typeName);
+            if (s != null) return s;
+
+            // If type does not exist, duplicate an existing one and modify it
+            var symbolToDuplicate = doc.GetElement(f.GetFamilySymbolIds().First()) as FamilySymbol;
+            using (var tx = new Transaction(doc, $"Create Type: {typeName}"))
+            {
+                tx.Start();
+                s = symbolToDuplicate.Duplicate(typeName) as FamilySymbol;
+                s.LookupParameter("Width").Set(Misc.MmToFoot(width));
+                s.LookupParameter("Height").Set(Misc.MmToFoot(height));
+                tx.Commit();
+            }
+            return s;
+        }
+
+        private static FamilySymbol NewRectColumnType(Document doc, string familyName, double width, double depth)
+        {
+            Family f = FamilyLoaderUtils.GetAndLoadFamily(doc, familyName, Properties.Settings.Default.url_columnRect);
+            if (f == null)
+            {
+                TaskDialog.Show("Family Load Error", $"The required family '{familyName}' could not be loaded.");
+                return null;
+            }
+
+            string typeName = $"{width} x {depth}mm";
+            FamilySymbol s = f.GetFamilySymbolIds().Select(id => doc.GetElement(id) as FamilySymbol).FirstOrDefault(fs => fs.Name == typeName);
+            if (s != null) return s;
+
+            var symbolToDuplicate = doc.GetElement(f.GetFamilySymbolIds().First()) as FamilySymbol;
+            using (var tx = new Transaction(doc, $"Create Type: {typeName}"))
+            {
+                tx.Start();
+                s = symbolToDuplicate.Duplicate(typeName) as FamilySymbol;
+                s.LookupParameter("Width").Set(Misc.MmToFoot(width));
+                s.LookupParameter("Depth").Set(Misc.MmToFoot(depth));
+                tx.Commit();
+            }
+            return s;
+        }
+
+        private static FamilySymbol NewRoundColumnType(Document doc, string familyName, double diameter)
+        {
+            Family f = FamilyLoaderUtils.GetAndLoadFamily(doc, familyName, Properties.Settings.Default.url_columnRound);
+            if (f == null)
+            {
+                TaskDialog.Show("Family Load Error", $"The required family '{familyName}' could not be loaded.");
+                return null;
+            }
+
+            string typeName = $"{diameter}mm Diameter";
+            FamilySymbol s = f.GetFamilySymbolIds().Select(id => doc.GetElement(id) as FamilySymbol).FirstOrDefault(fs => fs.Name == typeName);
+            if (s != null) return s;
+
+            var symbolToDuplicate = doc.GetElement(f.GetFamilySymbolIds().First()) as FamilySymbol;
+            using (var tx = new Transaction(doc, $"Create Type: {typeName}"))
+            {
+                tx.Start();
+                s = symbolToDuplicate.Duplicate(typeName) as FamilySymbol;
+                s.LookupParameter("Diameter").Set(Misc.MmToFoot(diameter));
+                tx.Commit();
+            }
+            return s;
+        }
+
+        private static FamilySymbol NewSpecialShapedColumnType(Application app, Document doc, CurveArray boundary)
+        {
+            // Convert CurveArray to List<Curve> for cleaning
+            List<Curve> boundaryCurves = new List<Curve>();
+            foreach (Curve c in boundary) { boundaryCurves.Add(c); }
+
+            // Use the new utility to ensure the boundary is closed
+            boundaryCurves = GeometryCleanUtils.CloseCurveChain(boundaryCurves);
+
+            // Convert back to CurveArray for the Revit API
+            CurveArray closedBoundary = new CurveArray();
+            foreach (Curve c in boundaryCurves) { closedBoundary.Append(c); }
+
+            Document familyDoc = app.NewFamilyDocument(Properties.Settings.Default.url_columnFamily);
+            using (Transaction tx_createFamily = new Transaction(familyDoc, "Create family"))
+            {
+                tx_createFamily.Start();
+                Plane familyGeomplane = Plane.CreateByNormalAndOrigin(XYZ.BasisZ, XYZ.Zero);
+                SketchPlane sketch = SketchPlane.Create(familyDoc, familyGeomplane);
+                CurveArrArray curveArrArray = new CurveArrArray();
+                curveArrArray.Append(closedBoundary);
+                Extrusion extrusion = familyDoc.FamilyCreate.NewExtrusion(true, curveArrArray, sketch, Misc.MmToFoot(4000));
+                familyDoc.FamilyManager.NewType("Type 0");
+                familyDoc.Regenerate();
+
+                Reference topFaceRef = null;
+                Options opt = new Options();
+                opt.ComputeReferences = true;
+                opt.DetailLevel = ViewDetailLevel.Fine;
+                GeometryElement gelm = extrusion.get_Geometry(opt);
+                foreach (GeometryObject gobj in gelm)
+                {
+                    if (gobj is Solid)
+                    {
+                        Solid solid = gobj as Solid;
+                        foreach (Face face in solid.Faces)
+                        {
+                            if (face.ComputeNormal(UV.Zero).IsAlmostEqualTo(XYZ.BasisZ))
+                            {
+                                topFaceRef = face.Reference;
+                            }
+                        }
+                    }
+                }
+                View v = GetView(familyDoc);
+                Reference r = GetUpperRefLevel(familyDoc);
+                Dimension d = familyDoc.FamilyCreate.NewAlignment(v, r, topFaceRef);
+                d.IsLocked = true;
+                tx_createFamily.Commit();
+            }
+
+            Family f = familyDoc.LoadFamily(doc) as Family;
+            FamilySymbol s = null;
+            foreach (ElementId id in f.GetFamilySymbolIds())
+            {
+                s = doc.GetElement(id) as FamilySymbol;
+            }
+            familyDoc.Close(false);
+            return s;
+        }
+
+        private static View GetView(Document doc)
+        {
+            FilteredElementCollector collector = new FilteredElementCollector(doc);
+            View v = collector.OfClass(typeof(View)).First(m => m.Name == "Front") as View;
+            return v;
+        }
+
+        private static Reference GetUpperRefLevel(Document doc)
+        {
+            FilteredElementCollector collector = new FilteredElementCollector(doc);
+            Level lvl = collector.OfClass(typeof(Level)).First(m => m.Name == "Upper Ref Level") as Level;
+            return new Reference(lvl);
+        }
+
+        #endregion
     }
 }
