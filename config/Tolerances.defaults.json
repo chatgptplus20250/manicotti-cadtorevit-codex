@@ -1,0 +1,11 @@
+{
+  "gapToleranceMm": 2.0,
+  "vertexMergeMm": 1.0,
+  "angleToleranceDeg": 2.0,
+  "microSegmentMinLengthMm": 50.0,
+  "doorWindowAxisSnapMm": 5.0,
+  "minWallLengthMm": 200.0,
+  "curvatureMinRadiusMm": 2000.0,
+  "flattenZToZero": true,
+  "explodeDynamicBlocks": true
+}

@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M-CAD Diagnostics Report",
+  "description": "Defines the structure for the diagnostics report generated after analyzing a CAD file.",
+  "type": "object",
+  "required": [
+    "session",
+    "counts",
+    "zAnomalies",
+    "duplicates"
+  ],
+  "properties": {
+    "session": {
+      "type": "object",
+      "properties": {
+        "timestamp": { "type": "string", "format": "date-time" },
+        "revitVersion": { "type": "string" },
+        "addonVersion": { "type": "string" },
+        "file": { "type": "string" }
+      }
+    },
+    "tolerances": { "type": "object" },
+    "layerMapEffective": { "type": "object" },
+    "counts": {
+      "type": "object",
+      "properties": {
+        "walls": { "type": "object" },
+        "doors": { "type": "object" },
+        "windows": { "type": "object" },
+        "columns": { "type": "object" },
+        "floors": { "type": "object" }
+      }
+    },
+    "zAnomalies": {
+      "type": "object",
+      "properties": {
+        "nonZero": { "type": "integer" },
+        "minZ": { "type": "number" },
+        "maxZ": { "type": "number" },
+        "meanZ": { "type": "number" }
+      }
+    },
+    "duplicates": {
+      "type": "object",
+      "properties": {
+        "linesMerged": { "type": "integer" },
+        "overlapsTrimmed": { "type": "integer" }
+      }
+    },
+    "microSegments": {
+      "type": "object",
+      "properties": {
+        "thresholdMm": { "type": "number" },
+        "found": { "type": "integer" }
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

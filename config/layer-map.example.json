@@ -1,0 +1,14 @@
+{
+  "caseInsensitive": true,
+  "wildcards": true,
+  "categories": {
+    "WALL":   ["WALL","A-WALL","WALL_*","W_*"],
+    "COLUMN": ["COLUMN","A-COL","STR_COL_*","COL_*"],
+    "DOOR":   ["DOOR","A-DOOR","D_*","DOOR_*"],
+    "WINDOW": ["WINDOW","A-WIN","WIN_*","WIND_*"],
+    "OPENING":["OPENING","A-OPEN","VOID","VO_*"],
+    "SLAB":   ["SLAB","A-SLAB","FLOOR","SLB_*"],
+    "GRID":   ["GRID","AXIS","A-GRID","GR_*"],
+    "SPACE":  ["SPACE","RM","ROOM","AREA"]
+  }
+}

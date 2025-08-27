@@ -1,0 +1,51 @@
+{
+  "session": {
+    "timestamp": "2025-08-27T10:00:00Z",
+    "revitVersion": "2024.1",
+    "addonVersion": "0.5.0",
+    "file": "Example_1.dwg"
+  },
+  "tolerances": {
+    "gapToleranceMm": 2.0,
+    "vertexMergeMm": 1.0
+  },
+  "layerMapEffective": {
+    "WALL": [
+      "A-WALL",
+      "WALL_*"
+    ],
+    "DOOR": [
+      "A-DOOR",
+      "D_*"
+    ]
+  },
+  "counts": {
+    "walls": {
+      "candidates": 150,
+      "builtPreview": 148
+    },
+    "doors": {
+      "blocks": 30,
+      "anchored": 28,
+      "offAxis": 2
+    }
+  },
+  "zAnomalies": {
+    "nonZero": 12,
+    "minZ": -0.5,
+    "maxZ": 5.2,
+    "meanZ": 0.8
+  },
+  "duplicates": {
+    "linesMerged": 45,
+    "overlapsTrimmed": 10
+  },
+  "microSegments": {
+    "thresholdMm": 50,
+    "found": 5
+  },
+  "warnings": [
+    "Could not resolve XREF: 'MEP_backdrop.dwg'",
+    "2 doors were off-axis and could not be hosted."
+  ]
+}

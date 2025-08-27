@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "M-CAD Layer Map Configuration",
+  "description": "Defines the mapping between CAD layer names and their functional roles in the M-CAD plugin.",
+  "type": "object",
+  "required": ["categories"],
+  "properties": {
+    "caseInsensitive": {
+      "type": "boolean",
+      "description": "If true, layer name matching is case-insensitive.",
+      "default": true
+    },
+    "wildcards": {
+      "type": "boolean",
+      "description": "If true, the '*' character at the end of a pattern acts as a wildcard.",
+      "default": true
+    },
+    "categories": {
+      "type": "object",
+      "description": "Maps functional roles to a list of layer name patterns.",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
